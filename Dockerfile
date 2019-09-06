@@ -28,8 +28,8 @@ ENV DB_NAME /data/hc.sqlite
 RUN apk add --no-cache libpq \
     mailcap
 
-RUN addgroup -g 900 -S healthchecks && \
-    adduser -u 900 -S healthchecks -G healthchecks
+RUN addgroup -g 100005 -S healthchecks && \
+    adduser -u 100005 -S healthchecks -G healthchecks
 
 WORKDIR /app
 
