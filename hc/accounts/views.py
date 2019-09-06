@@ -1,6 +1,5 @@
 from datetime import timedelta as td
 import uuid
-import re
 
 from django.conf import settings
 from django.contrib import messages
@@ -10,28 +9,39 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core import signing
-from django.http import HttpResponseForbidden, HttpResponseBadRequest
+from django.http import (
+    HttpResponseForbidden,
+    HttpResponseBadRequest,
+    HttpResponseNotFound,
+)
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.timezone import now
 from django.urls import resolve, Resolver404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from hc.accounts.forms import (ChangeEmailForm, EmailPasswordForm,
-                               InviteTeamMemberForm, RemoveTeamMemberForm,
-                               ReportSettingsForm, SetPasswordForm,
-                               ProjectNameForm, AvailableEmailForm,
-                               ExistingEmailForm)
+from hc.accounts.forms import (
+    ChangeEmailForm,
+    PasswordLoginForm,
+    InviteTeamMemberForm,
+    RemoveTeamMemberForm,
+    ReportSettingsForm,
+    SetPasswordForm,
+    ProjectNameForm,
+    AvailableEmailForm,
+    EmailLoginForm,
+)
 from hc.accounts.models import Profile, Project, Member
-from hc.api.models import Channel, Check
-from hc.lib.badges import get_badge_url
+from hc.api.models import Channel, Check, TokenBucket
 from hc.payments.models import Subscription
 
-NEXT_WHITELIST = ("hc-checks",
-                  "hc-details",
-                  "hc-log",
-                  "hc-channels",
-                  "hc-add-slack",
-                  "hc-add-pushover")
+NEXT_WHITELIST = (
+    "hc-checks",
+    "hc-details",
+    "hc-log",
+    "hc-channels",
+    "hc-add-slack",
+    "hc-add-pushover",
+)
 
 
 def _is_whitelisted(path):
@@ -90,35 +100,38 @@ def _redirect_after_login(request):
 
 
 def login(request):
-    form = EmailPasswordForm()
-    magic_form = ExistingEmailForm()
+    form = PasswordLoginForm()
+    magic_form = EmailLoginForm()
 
-    if request.method == 'POST':
+    if request.method == "POST":
         if request.POST.get("action") == "login":
-            form = EmailPasswordForm(request.POST)
+            form = PasswordLoginForm(request.POST)
             if form.is_valid():
                 auth_login(request, form.user)
                 return _redirect_after_login(request)
 
         else:
-            magic_form = ExistingEmailForm(request.POST)
+            magic_form = EmailLoginForm(request.POST)
             if magic_form.is_valid():
-                profile = Profile.objects.for_user(magic_form.user)
-
                 redirect_url = request.GET.get("next")
-                if _is_whitelisted(redirect_url):
-                    profile.send_instant_login_link(redirect_url=redirect_url)
-                else:
-                    profile.send_instant_login_link()
+                if not _is_whitelisted(redirect_url):
+                    redirect_url = None
 
-                return redirect("hc-login-link-sent")
+                profile = Profile.objects.for_user(magic_form.user)
+                profile.send_instant_login_link(redirect_url=redirect_url)
+                response = redirect("hc-login-link-sent")
+
+                # check_token_submit looks for this cookie to decide if
+                # it needs to do the extra POST step.
+                response.set_cookie("auto-login", "1", max_age=300, httponly=True)
+                return response
 
     bad_link = request.session.pop("bad_link", None)
     ctx = {
         "page": "login",
         "form": form,
         "magic_form": magic_form,
-        "bad_link": bad_link
+        "bad_link": bad_link,
     }
     return render(request, "accounts/login.html", ctx)
 
@@ -161,12 +174,13 @@ def check_token(request, username, token):
         return _redirect_after_login(request)
 
     # Some email servers open links in emails to check for malicious content.
-    # To work around this, we sign user in if the method is POST.
+    # To work around this, we sign user in if the method is POST
+    # *or* if the browser presents a cookie we had set when sending the login link.
     #
     # If the method is GET, we instead serve a HTML form and a piece
     # of Javascript to automatically submit it.
 
-    if request.method == "POST":
+    if request.method == "POST" or "auto-login" in request.COOKIES:
         user = authenticate(username=username, token=token)
         if user is not None and user.is_active:
             user.profile.token = ""
@@ -185,11 +199,7 @@ def check_token(request, username, token):
 def profile(request):
     profile = request.profile
 
-    ctx = {
-        "page": "profile",
-        "profile": profile,
-        "my_projects_status": "default"
-    }
+    ctx = {"page": "profile", "profile": profile, "my_projects_status": "default"}
 
     if request.method == "POST":
         if "change_email" in request.POST:
@@ -201,8 +211,7 @@ def profile(request):
         elif "leave_project" in request.POST:
             code = request.POST["code"]
             try:
-                project = Project.objects.get(code=code,
-                                              member__user=request.user)
+                project = Project.objects.get(code=code, member__user=request.user)
             except Project.DoesNotExist:
                 return HttpResponseBadRequest()
 
@@ -238,15 +247,25 @@ def add_project(request):
 
 @login_required
 def project(request, code):
-    project = get_object_or_404(Project, code=code, owner=request.user)
+    if request.user.is_superuser:
+        q = Project.objects
+    else:
+        q = request.profile.projects()
 
+    try:
+        project = q.get(code=code)
+    except Project.DoesNotExist:
+        return HttpResponseNotFound()
+
+    is_owner = project.owner_id == request.user.id
     ctx = {
         "page": "project",
         "project": project,
-        "show_api_keys": False,
+        "is_owner": is_owner,
+        "show_api_keys": "show_api_keys" in request.GET,
         "project_name_status": "default",
         "api_status": "default",
-        "team_status": "default"
+        "team_status": "default",
     }
 
     if request.method == "POST":
@@ -267,11 +286,13 @@ def project(request, code):
         elif "show_api_keys" in request.POST:
             ctx["show_api_keys"] = True
         elif "invite_team_member" in request.POST:
-            if not project.can_invite():
+            if not is_owner or not project.can_invite():
                 return HttpResponseForbidden()
 
             form = InviteTeamMemberForm(request.POST)
             if form.is_valid():
+                if not TokenBucket.authorize_invite(request.user):
+                    return render(request, "try_later.html")
 
                 email = form.cleaned_data["email"]
                 try:
@@ -284,6 +305,9 @@ def project(request, code):
                 ctx["team_status"] = "success"
 
         elif "remove_team_member" in request.POST:
+            if not is_owner:
+                return HttpResponseForbidden()
+
             form = RemoveTeamMemberForm(request.POST)
             if form.is_valid():
                 q = User.objects
@@ -296,8 +320,7 @@ def project(request, code):
                 farewell_user.profile.current_project = None
                 farewell_user.profile.save()
 
-                Member.objects.filter(project=project,
-                                      user=farewell_user).delete()
+                Member.objects.filter(project=project, user=farewell_user).delete()
 
                 ctx["team_member_removed"] = form.cleaned_data["email"]
                 ctx["team_status"] = "info"
@@ -323,11 +346,7 @@ def project(request, code):
 def notifications(request):
     profile = request.profile
 
-    ctx = {
-        "status": "default",
-        "page": "profile",
-        "profile": profile
-    }
+    ctx = {"status": "default", "page": "profile", "profile": profile}
 
     if request.method == "POST":
         form = ReportSettingsForm(request.POST)
@@ -352,37 +371,6 @@ def notifications(request):
             ctx["status"] = "info"
 
     return render(request, "accounts/notifications.html", ctx)
-
-
-@login_required
-def badges(request):
-    badge_sets = []
-    for project in request.profile.projects():
-        tags = set()
-        for check in Check.objects.filter(project=project):
-            tags.update(check.tags_list())
-
-        sorted_tags = sorted(tags, key=lambda s: s.lower())
-        sorted_tags.append("*")  # For the "overall status" badge
-
-        urls = []
-        for tag in sorted_tags:
-            if not re.match("^[\w-]+$", tag) and tag != "*":
-                continue
-
-            urls.append({
-                "svg": get_badge_url(project.badge_key, tag),
-                "json": get_badge_url(project.badge_key, tag, format="json"),
-            })
-
-        badge_sets.append({"project": project, "urls": urls})
-
-    ctx = {
-        "page": "profile",
-        "badges": badge_sets
-    }
-
-    return render(request, "accounts/badges.html", ctx)
 
 
 @login_required

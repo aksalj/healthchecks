@@ -4,10 +4,40 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Improvements
+- Add the `prunetokenbucket` management command
+- Show check counts in JSON "badges" (#251)
+- Webhooks support HTTP PUT (#249)
+- Webhooks can use different req. bodies and headers for "up" and "down" events. (#249)
+- Show check's code instead of full URL on 992px - 1200px wide screens. (#253)
+
+### Bug Fixes
+- Fix badges for tags containing special characters (#240, #237)
+- Fix the "Integrations" page for when the user has no active project
+- Prevent email clients from opening the one-time login links (#255)
+
+
+## 1.7.0 - 2019-05-02
+
+### Improvements
+- Add the EMAIL_USE_VERIFICATION configuration setting (#232)
+- Show "Badges" and "Settings" in top navigation (#234)
+- Upgrade to Django 2.2
+- Can configure the email integration to only report the "down" events (#231)
+- Add "Test!" function in the Integrations page (#207)
+- Rate limiting for the log in attempts
+- Password strength meter and length check in the "Set Password" form
+- Show the Description section even if the description is missing. (#246)
+- Include the description in email alerts. (#247)
+
+## 1.6.0 - 2019-04-01
+
+### Improvements
 - Add the "desc" field (check's description) to API responses
 - Add maxlength attribute to HTML input=text elements
 - Improved logic for displaying job execution times in log (#219)
 - Add Matrix integration
+- Add Pager Team integration
+- Add a management command for sending inactive account notifications
 
 ### Bug Fixes
 - Fix refreshing of the checks page filtered by tags (#221)

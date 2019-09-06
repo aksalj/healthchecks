@@ -1,20 +1,27 @@
 from django.core import mail
 
 from django.conf import settings
+from django.test.utils import override_settings
 from hc.test import BaseTestCase
 from hc.accounts.models import Member
+from hc.api.models import TokenBucket
 
 
-class ProfileTestCase(BaseTestCase):
+class ProjectTestCase(BaseTestCase):
     def setUp(self):
-        super(ProfileTestCase, self).setUp()
+        super(ProjectTestCase, self).setUp()
 
         self.url = "/projects/%s/settings/" % self.project.code
 
     def test_it_checks_access(self):
-        self.client.login(username="bob@example.org", password="password")
+        self.client.login(username="charlie@example.org", password="password")
         r = self.client.get(self.url)
         self.assertEqual(r.status_code, 404)
+
+    def test_it_allows_team_access(self):
+        self.client.login(username="bob@example.org", password="password")
+        r = self.client.get(self.url)
+        self.assertContains(r, "Change Project Name")
 
     def test_it_shows_api_keys(self):
         self.project.api_key_readonly = "R" * 32
@@ -65,8 +72,9 @@ class ProfileTestCase(BaseTestCase):
         members = self.project.member_set.all()
         self.assertEqual(members.count(), 2)
 
-        member = Member.objects.get(project=self.project,
-                                    user__email="frank@example.org")
+        member = Member.objects.get(
+            project=self.project, user__email="frank@example.org"
+        )
 
         profile = member.user.profile
         self.assertEqual(profile.current_project, self.project)
@@ -74,9 +82,32 @@ class ProfileTestCase(BaseTestCase):
         self.assertFalse(member.user.project_set.exists())
 
         # And an email should have been sent
-        subj = ("You have been invited to join"
-                " Alice&#39;s Project on %s" % settings.SITE_NAME)
+        subj = (
+            "You have been invited to join"
+            " Alice&#39;s Project on %s" % settings.SITE_NAME
+        )
         self.assertEqual(mail.outbox[0].subject, subj)
+
+    @override_settings(SECRET_KEY="test-secret")
+    def test_it_rate_limits_invites(self):
+        obj = TokenBucket(value="invite-%d" % self.alice.id)
+        obj.tokens = 0
+        obj.save()
+
+        self.client.login(username="alice@example.org", password="password")
+
+        form = {"invite_team_member": "1", "email": "frank@example.org"}
+        r = self.client.post(self.url, form)
+        self.assertContains(r, "Too Many Requests")
+
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_it_requires_owner_to_add_team_member(self):
+        self.client.login(username="bob@example.org", password="password")
+
+        form = {"invite_team_member": "1", "email": "frank@example.org"}
+        r = self.client.post(self.url, form)
+        self.assertEqual(r.status_code, 403)
 
     def test_it_checks_team_size(self):
         self.profile.team_limit = 0
@@ -99,6 +130,13 @@ class ProfileTestCase(BaseTestCase):
 
         self.bobs_profile.refresh_from_db()
         self.assertEqual(self.bobs_profile.current_project, None)
+
+    def test_it_requires_owner_to_remove_team_member(self):
+        self.client.login(username="bob@example.org", password="password")
+
+        form = {"remove_team_member": "1", "email": "bob@example.org"}
+        r = self.client.post(self.url, form)
+        self.assertEqual(r.status_code, 403)
 
     def test_it_checks_membership_when_removing_team_member(self):
         self.client.login(username="charlie@example.org", password="password")

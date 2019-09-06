@@ -1,14 +1,49 @@
 from datetime import timedelta as td
 import json
-import re
 from urllib.parse import quote, urlencode
 
 from django import forms
+from django.forms import URLField
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from hc.front.validators import (CronExpressionValidator, TimezoneValidator,
-                                 WebhookValidator)
+from hc.front.validators import (
+    CronExpressionValidator,
+    TimezoneValidator,
+    WebhookValidator,
+)
 import requests
+
+
+class HeadersField(forms.Field):
+    message = """Use "Header-Name: value" pairs, one per line."""
+
+    def to_python(self, value):
+        if not value:
+            return {}
+
+        headers = {}
+        for line in value.split("\n"):
+            if not line.strip():
+                continue
+
+            if ":" not in value:
+                raise ValidationError(self.message)
+
+            n, v = line.split(":", maxsplit=1)
+            n, v = n.strip(), v.strip()
+            if not n or not v:
+                raise ValidationError(message=self.message)
+
+            headers[n] = v
+
+        return headers
+
+    def validate(self, value):
+        super().validate(value)
+        for k, v in value.items():
+            if len(k) > 1000 or len(v) > 1000:
+                raise ValidationError("Value too long")
 
 
 class NameTagsForm(forms.Form):
@@ -43,8 +78,7 @@ class TimeoutForm(forms.Form):
 
 
 class CronForm(forms.Form):
-    schedule = forms.CharField(max_length=100,
-                               validators=[CronExpressionValidator()])
+    schedule = forms.CharField(max_length=100, validators=[CronExpressionValidator()])
     tz = forms.CharField(max_length=36, validators=[TimezoneValidator()])
     grace = forms.IntegerField(min_value=1, max_value=43200)
 
@@ -57,6 +91,8 @@ class AddOpsGenieForm(forms.Form):
 class AddEmailForm(forms.Form):
     error_css_class = "has-error"
     value = forms.EmailField(max_length=100)
+    down = forms.BooleanField(required=False, initial=True)
+    up = forms.BooleanField(required=False, initial=True)
 
 
 class AddUrlForm(forms.Form):
@@ -64,51 +100,33 @@ class AddUrlForm(forms.Form):
     value = forms.URLField(max_length=1000, validators=[WebhookValidator()])
 
 
-_valid_header_name = re.compile(r'\A[^:\s][^:\r\n]*\Z').match
+METHODS = ("GET", "POST", "PUT")
 
 
 class AddWebhookForm(forms.Form):
     error_css_class = "has-error"
 
-    url_down = forms.URLField(max_length=1000, required=False,
-                              validators=[WebhookValidator()])
+    method_down = forms.ChoiceField(initial="GET", choices=zip(METHODS, METHODS))
+    body_down = forms.CharField(max_length=1000, required=False)
+    headers_down = HeadersField(required=False)
+    url_down = URLField(
+        max_length=1000, required=False, validators=[WebhookValidator()]
+    )
 
-    url_up = forms.URLField(max_length=1000, required=False,
-                            validators=[WebhookValidator()])
-
-    post_data = forms.CharField(max_length=1000, required=False)
-
-    def __init__(self, *args, **kwargs):
-        super(AddWebhookForm, self).__init__(*args, **kwargs)
-
-        self.invalid_header_names = set()
-        self.headers = {}
-        if "header_key[]" in self.data and "header_value[]" in self.data:
-            keys = self.data.getlist("header_key[]")
-            values = self.data.getlist("header_value[]")
-            for key, value in zip(keys, values):
-                if not key:
-                    continue
-
-                if not _valid_header_name(key):
-                    self.invalid_header_names.add(key)
-
-                self.headers[key] = value
-
-    def clean(self):
-        if self.invalid_header_names:
-            raise forms.ValidationError("Invalid header names")
-
-        return self.cleaned_data
+    method_up = forms.ChoiceField(initial="GET", choices=zip(METHODS, METHODS))
+    body_up = forms.CharField(max_length=1000, required=False)
+    headers_up = HeadersField(required=False)
+    url_up = forms.URLField(
+        max_length=1000, required=False, validators=[WebhookValidator()]
+    )
 
     def get_value(self):
-        val = dict(self.cleaned_data)
-        val["headers"] = self.headers
-        return json.dumps(val, sort_keys=True)
+        return json.dumps(dict(self.cleaned_data), sort_keys=True)
 
 
-phone_validator = RegexValidator(regex='^\+\d{5,15}$',
-                                 message="Invalid phone number format.")
+phone_validator = RegexValidator(
+    regex="^\+\d{5,15}$", message="Invalid phone number format."
+)
 
 
 class AddSmsForm(forms.Form):
@@ -134,8 +152,7 @@ class AddMatrixForm(forms.Form):
         url += urlencode({"access_token": settings.MATRIX_ACCESS_TOKEN})
         doc = requests.post(url, {}).json()
         if "error" in doc:
-            raise forms.ValidationError(
-                "Response from Matrix: %s" % doc["error"])
+            raise forms.ValidationError("Response from Matrix: %s" % doc["error"])
 
         self.cleaned_data["room_id"] = doc["room_id"]
 

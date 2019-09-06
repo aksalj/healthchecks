@@ -38,22 +38,24 @@ def site_root():
 @register.simple_tag
 def debug_warning():
     if settings.DEBUG:
-        return mark_safe("""
+        return mark_safe(
+            """
             <div id="debug-warning">
             Running in debug mode, do not use in production.
             </div>
-        """)
+        """
+        )
 
     return ""
 
 
 def naturalize_int_match(match):
-    return '%08d' % (int(match.group(0)),)
+    return "%08d" % (int(match.group(0)),)
 
 
 def natural_name_key(check):
     s = check.name.lower().strip()
-    return re.sub(r'\d+', naturalize_int_match, s)
+    return re.sub(r"\d+", naturalize_int_match, s)
 
 
 def last_ping_key(check):
@@ -121,3 +123,8 @@ def fix_asterisks(s):
     """ Prepend asterisks with "Combining Grapheme Joiner" characters. """
 
     return s.replace("*", "\u034f*")
+
+
+@register.filter
+def format_headers(headers):
+    return "\n".join("%s: %s" % (k, v) for k, v in headers.items())

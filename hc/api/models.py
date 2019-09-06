@@ -15,42 +15,33 @@ from hc.api import transports
 from hc.lib import emails
 import pytz
 
-STATUSES = (
-    ("up", "Up"),
-    ("down", "Down"),
-    ("new", "New"),
-    ("paused", "Paused")
-)
+STATUSES = (("up", "Up"), ("down", "Down"), ("new", "New"), ("paused", "Paused"))
 DEFAULT_TIMEOUT = td(days=1)
 DEFAULT_GRACE = td(hours=1)
 NEVER = datetime(3000, 1, 1, tzinfo=pytz.UTC)
-CHECK_KINDS = (("simple", "Simple"),
-               ("cron", "Cron"))
+CHECK_KINDS = (("simple", "Simple"), ("cron", "Cron"))
 
-CHANNEL_KINDS = (("email", "Email"),
-                 ("webhook", "Webhook"),
-                 ("hipchat", "HipChat"),
-                 ("slack", "Slack"),
-                 ("pd", "PagerDuty"),
-                 ("pagertree", "PagerTree"),
-                 ("po", "Pushover"),
-                 ("pushbullet", "Pushbullet"),
-                 ("opsgenie", "OpsGenie"),
-                 ("victorops", "VictorOps"),
-                 ("discord", "Discord"),
-                 ("telegram", "Telegram"),
-                 ("sms", "SMS"),
-                 ("zendesk", "Zendesk"),
-                 ("trello", "Trello"),
-                 ("matrix", "Matrix"))
+CHANNEL_KINDS = (
+    ("email", "Email"),
+    ("webhook", "Webhook"),
+    ("hipchat", "HipChat"),
+    ("slack", "Slack"),
+    ("pd", "PagerDuty"),
+    ("pagertree", "PagerTree"),
+    ("pagerteam", "Pager Team"),
+    ("po", "Pushover"),
+    ("pushbullet", "Pushbullet"),
+    ("opsgenie", "OpsGenie"),
+    ("victorops", "VictorOps"),
+    ("discord", "Discord"),
+    ("telegram", "Telegram"),
+    ("sms", "SMS"),
+    ("zendesk", "Zendesk"),
+    ("trello", "Trello"),
+    ("matrix", "Matrix"),
+)
 
-PO_PRIORITIES = {
-    -2: "lowest",
-    -1: "low",
-    0: "normal",
-    1: "high",
-    2: "emergency"
-}
+PO_PRIORITIES = {-2: "lowest", -1: "low", 0: "normal", 1: "high", 2: "emergency"}
 
 
 def isostring(dt):
@@ -67,8 +58,7 @@ class Check(models.Model):
     desc = models.TextField(blank=True)
     project = models.ForeignKey(Project, models.CASCADE)
     created = models.DateTimeField(auto_now_add=True)
-    kind = models.CharField(max_length=10, default="simple",
-                            choices=CHECK_KINDS)
+    kind = models.CharField(max_length=10, default="simple", choices=CHECK_KINDS)
     timeout = models.DurationField(default=DEFAULT_TIMEOUT)
     grace = models.DurationField(default=DEFAULT_GRACE)
     schedule = models.CharField(max_length=100, default="* * * * *")
@@ -193,7 +183,7 @@ class Check(models.Model):
             "channels": ",".join(sorted(channel_codes)),
             "last_ping": isostring(self.last_ping),
             "next_ping": isostring(self.get_grace_start()),
-            "desc": self.desc
+            "desc": self.desc,
         }
 
         if self.kind == "simple":
@@ -271,7 +261,7 @@ class Channel(models.Model):
         if self.name:
             return self.name
         if self.kind == "email":
-            return "Email to %s" % self.value
+            return "Email to %s" % self.email_value
         elif self.kind == "sms":
             return "SMS to %s" % self.sms_number
         elif self.kind == "slack":
@@ -282,11 +272,7 @@ class Channel(models.Model):
         return self.get_kind_display()
 
     def to_dict(self):
-        return {
-            "id": str(self.code),
-            "name": self.name,
-            "kind": self.kind
-        }
+        return {"id": str(self.code), "name": self.name, "kind": self.kind}
 
     def assign_all_checks(self):
         checks = Check.objects.filter(project=self.project)
@@ -301,7 +287,7 @@ class Channel(models.Model):
         args = [self.code, self.make_token()]
         verify_link = reverse("hc-verify-email", args=args)
         verify_link = settings.SITE_ROOT + verify_link
-        emails.verify_email(self.value, {"verify_link": verify_link})
+        emails.verify_email(self.email_value, {"verify_link": verify_link})
 
     def get_unsub_link(self):
         args = [self.code, self.make_token()]
@@ -322,6 +308,8 @@ class Channel(models.Model):
             return transports.PagerDuty(self)
         elif self.kind == "pagertree":
             return transports.PagerTree(self)
+        elif self.kind == "pagerteam":
+            return transports.PagerTeam(self)
         elif self.kind == "victorops":
             return transports.VictorOps(self)
         elif self.kind == "pushbullet":
@@ -363,7 +351,7 @@ class Channel(models.Model):
         return error
 
     def icon_path(self):
-        return 'img/integrations/%s.png' % self.kind
+        return "img/integrations/%s.png" % self.kind
 
     @property
     def po_priority(self):
@@ -372,44 +360,62 @@ class Channel(models.Model):
         prio = int(parts[1])
         return PO_PRIORITIES[prio]
 
-    @property
-    def url_down(self):
+    def webhook_spec(self, status):
         assert self.kind == "webhook"
+
         if not self.value.startswith("{"):
             parts = self.value.split("\n")
-            return parts[0]
+            url_down = parts[0]
+            url_up = parts[1] if len(parts) > 1 else ""
+            post_data = parts[2] if len(parts) > 2 else ""
+
+            return {
+                "method": "POST" if post_data else "GET",
+                "url": url_down if status == "down" else url_up,
+                "body": post_data,
+                "headers": {},
+            }
 
         doc = json.loads(self.value)
-        return doc.get("url_down")
+        if "post_data" in doc:
+            # Legacy "post_data" in doc -- use the legacy fields
+            return {
+                "method": "POST" if doc["post_data"] else "GET",
+                "url": doc["url_down"] if status == "down" else doc["url_up"],
+                "body": doc["post_data"],
+                "headers": doc["headers"],
+            }
+
+        if status == "down" and "method_down" in doc:
+            return {
+                "method": doc["method_down"],
+                "url": doc["url_down"],
+                "body": doc["body_down"],
+                "headers": doc["headers_down"],
+            }
+        elif status == "up" and "method_up" in doc:
+            return {
+                "method": doc["method_up"],
+                "url": doc["url_up"],
+                "body": doc["body_up"],
+                "headers": doc["headers_up"],
+            }
+
+    @property
+    def down_webhook_spec(self):
+        return self.webhook_spec("down")
+
+    @property
+    def up_webhook_spec(self):
+        return self.webhook_spec("up")
+
+    @property
+    def url_down(self):
+        return self.down_webhook_spec["url"]
 
     @property
     def url_up(self):
-        assert self.kind == "webhook"
-        if not self.value.startswith("{"):
-            parts = self.value.split("\n")
-            return parts[1] if len(parts) > 1 else ""
-
-        doc = json.loads(self.value)
-        return doc.get("url_up")
-
-    @property
-    def post_data(self):
-        assert self.kind == "webhook"
-        if not self.value.startswith("{"):
-            parts = self.value.split("\n")
-            return parts[2] if len(parts) > 2 else ""
-
-        doc = json.loads(self.value)
-        return doc.get("post_data")
-
-    @property
-    def headers(self):
-        assert self.kind == "webhook"
-        if not self.value.startswith("{"):
-            return {}
-
-        doc = json.loads(self.value)
-        return doc.get("headers", {})
+        return self.up_webhook_spec["url"]
 
     @property
     def slack_team(self):
@@ -523,6 +529,33 @@ class Channel(models.Model):
             doc = json.loads(self.value)
             return doc["list_id"]
 
+    @property
+    def email_value(self):
+        assert self.kind == "email"
+        if not self.value.startswith("{"):
+            return self.value
+
+        doc = json.loads(self.value)
+        return doc.get("value")
+
+    @property
+    def email_notify_up(self):
+        assert self.kind == "email"
+        if not self.value.startswith("{"):
+            return True
+
+        doc = json.loads(self.value)
+        return doc.get("up")
+
+    @property
+    def email_notify_down(self):
+        assert self.kind == "email"
+        if not self.value.startswith("{"):
+            return True
+
+        doc = json.loads(self.value)
+        return doc.get("down")
+
 
 class Notification(models.Model):
     class Meta:
@@ -561,3 +594,61 @@ class Flip(models.Model):
                 errors.append((channel, error))
 
         return errors
+
+
+class TokenBucket(models.Model):
+    value = models.CharField(max_length=80, unique=True)
+    tokens = models.FloatField(default=1.0)
+    updated = models.DateTimeField(default=timezone.now)
+
+    @staticmethod
+    def authorize(value, capacity, refill_time_secs):
+        now = timezone.now()
+        obj, created = TokenBucket.objects.get_or_create(value=value)
+
+        if not created:
+            # Top up the bucket:
+            delta_secs = (now - obj.updated).total_seconds()
+            obj.tokens = min(1.0, obj.tokens + delta_secs / refill_time_secs)
+
+        obj.tokens -= 1.0 / capacity
+        if obj.tokens < 0:
+            # Not enough tokens
+            return False
+
+        # Race condition: two concurrent authorize calls can overwrite each
+        # other's changes. It's OK to be a little inexact here for the sake
+        # of simplicity.
+        obj.updated = now
+        obj.save()
+
+        return True
+
+    @staticmethod
+    def authorize_login_email(email):
+        # remove dots and alias:
+        mailbox, domain = email.split("@")
+        mailbox = mailbox.replace(".", "")
+        mailbox = mailbox.split("+")[0]
+        email = mailbox + "@" + domain
+
+        salted_encoded = (email + settings.SECRET_KEY).encode()
+        value = "em-%s" % hashlib.sha1(salted_encoded).hexdigest()
+
+        # 20 login attempts for a single email per hour:
+        return TokenBucket.authorize(value, 20, 3600)
+
+    @staticmethod
+    def authorize_invite(user):
+        value = "invite-%d" % user.id
+
+        # 20 invites per day
+        return TokenBucket.authorize(value, 20, 3600 * 24)
+
+    @staticmethod
+    def authorize_login_password(email):
+        salted_encoded = (email + settings.SECRET_KEY).encode()
+        value = "pw-%s" % hashlib.sha1(salted_encoded).hexdigest()
+
+        # 20 password attempts per day
+        return TokenBucket.authorize(value, 20, 3600 * 24)

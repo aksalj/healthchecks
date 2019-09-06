@@ -1,12 +1,11 @@
 {% load hc_extras %}
-Hello,
-
-This is a notification sent by {% site_name %}.
 The check "{{ check.name_then_code }}" has gone {{ check.status }}.
-
-Here is a summary of all your checks:
-
-{% include 'emails/summary-text.html' %}
+{% if check.status == "down" and check.desc %}
+Additional notes:
+{{ check.desc }}
+{% endif %}
+More information:
+{{ check.details_url }}
 
 --
 Regards,

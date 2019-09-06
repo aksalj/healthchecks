@@ -4,8 +4,12 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
 from django.db import connection
-from django.http import (HttpResponse, HttpResponseForbidden,
-                         HttpResponseNotFound, JsonResponse)
+from django.http import (
+    HttpResponse,
+    HttpResponseForbidden,
+    HttpResponseNotFound,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
@@ -200,7 +204,6 @@ def badge(request, badge_key, signature, tag, format="svg"):
     if not check_signature(badge_key, tag, signature):
         return HttpResponseNotFound()
 
-    status = "up"
     q = Check.objects.filter(project__badge_key=badge_key)
     if tag != "*":
         q = q.filter(tags__contains=tag)
@@ -208,20 +211,30 @@ def badge(request, badge_key, signature, tag, format="svg"):
     else:
         label = settings.MASTER_BADGE_LABEL
 
+    status, total, grace, down = "up", 0, 0, 0
     for check in q:
         if tag != "*" and tag not in check.tags_list():
             continue
 
+        total += 1
         check_status = check.get_status(with_started=False)
-        if status == "up" and check_status == "grace":
-            status = "late"
 
         if check_status == "down":
+            down += 1
             status = "down"
-            break
+            if format == "svg":
+                # For SVG badges, we can leave the loop as soon as we
+                # find the first "down"
+                break
+        elif check_status == "grace":
+            grace += 1
+            if status == "up":
+                status = "late"
 
     if format == "json":
-        return JsonResponse({"status": status})
+        return JsonResponse(
+            {"status": status, "total": total, "grace": grace, "down": down}
+        )
 
     svg = get_badge_svg(label, status)
     return HttpResponse(svg, content_type="image/svg+xml")

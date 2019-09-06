@@ -9,7 +9,6 @@ from hc.test import BaseTestCase
 
 
 class BadgeTestCase(BaseTestCase):
-
     def setUp(self):
         super(BadgeTestCase, self).setUp()
         self.check = Check.objects.create(project=self.project, tags="foo bar")
@@ -33,6 +32,14 @@ class BadgeTestCase(BaseTestCase):
         self.assertEqual(r.status_code, 204)
         self.assertEqual(r["Access-Control-Allow-Origin"], "*")
 
+    def test_it_handles_new(self):
+        r = self.client.get(self.json_url)
+        doc = r.json()
+        self.assertEqual(doc["status"], "up")
+        self.assertEqual(doc["total"], 1)
+        self.assertEqual(doc["grace"], 0)
+        self.assertEqual(doc["down"], 0)
+
     def test_it_handles_started_but_down(self):
         self.check.last_start = now()
         self.check.tags = "foo"
@@ -40,7 +47,11 @@ class BadgeTestCase(BaseTestCase):
         self.check.save()
 
         r = self.client.get(self.json_url)
-        self.assertContains(r, "down")
+        doc = r.json()
+        self.assertEqual(doc["status"], "down")
+        self.assertEqual(doc["total"], 1)
+        self.assertEqual(doc["grace"], 0)
+        self.assertEqual(doc["down"], 1)
 
     def test_it_shows_grace_badge(self):
         self.check.last_ping = now() - td(days=1, minutes=10)
@@ -49,7 +60,11 @@ class BadgeTestCase(BaseTestCase):
         self.check.save()
 
         r = self.client.get(self.json_url)
-        self.assertContains(r, "late")
+        doc = r.json()
+        self.assertEqual(doc["status"], "late")
+        self.assertEqual(doc["total"], 1)
+        self.assertEqual(doc["grace"], 1)
+        self.assertEqual(doc["down"], 0)
 
     def test_it_shows_started_but_grace_badge(self):
         self.check.last_start = now()
@@ -59,4 +74,19 @@ class BadgeTestCase(BaseTestCase):
         self.check.save()
 
         r = self.client.get(self.json_url)
-        self.assertContains(r, "late")
+        doc = r.json()
+        self.assertEqual(doc["status"], "late")
+        self.assertEqual(doc["total"], 1)
+        self.assertEqual(doc["grace"], 1)
+        self.assertEqual(doc["down"], 0)
+
+    def test_it_handles_special_characters(self):
+        self.check.tags = "db@dc1"
+        self.check.save()
+
+        sig = base64_hmac(str(self.project.badge_key), "db@dc1", settings.SECRET_KEY)
+        sig = sig[:8]
+        url = "/badge/%s/%s/db%%2540dc1.svg" % (self.project.badge_key, sig)
+
+        r = self.client.get(url)
+        self.assertEqual(r.status_code, 200)

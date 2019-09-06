@@ -32,7 +32,7 @@ in development environment.
 * install dependencies (Debian/Ubuntu)
 
         $ sudo apt-get update
-        $ sudo apt-get install -y gcc python3-dev
+        $ sudo apt-get install -y gcc python3-dev python3-venv
 
 * prepare directory for project code and virtualenv:
 
@@ -95,7 +95,7 @@ Configurations settings loaded from environment variables:
 | DB | `"sqlite"` | Set to `"postgres"` or `"mysql"`
 | [DB_HOST](https://docs.djangoproject.com/en/2.1/ref/settings/#host) | `""` *(empty string)*
 | [DB_PORT](https://docs.djangoproject.com/en/2.1/ref/settings/#port) | `""` *(empty string)*
-| [DB_NAME](https://docs.djangoproject.com/en/2.1/ref/settings/#name) | `"hc"`
+| [DB_NAME](https://docs.djangoproject.com/en/2.1/ref/settings/#name) | `"hc"` (PostgreSQL, MySQL) or `"/path/to/project/hc.sqlite"` (SQLite) | For SQLite, specify the full path to the database file.
 | [DB_USER](https://docs.djangoproject.com/en/2.1/ref/settings/#user) | `"postgres"` or `"root"`
 | [DB_PASSWORD](https://docs.djangoproject.com/en/2.1/ref/settings/#password) | `""` *(empty string)*
 | [DB_CONN_MAX_AGE](https://docs.djangoproject.com/en/2.1/ref/settings/#conn-max-age) | `0`
@@ -106,6 +106,7 @@ Configurations settings loaded from environment variables:
 | EMAIL_HOST_USER | `""` *(empty string)*
 | EMAIL_HOST_PASSWORD | `""` *(empty string)*
 | EMAIL_USE_TLS | `"True"`
+| EMAIL_USE_VERIFICATION | `"True"`
 | SITE_ROOT | `"http://localhost:8000"`
 | SITE_NAME | `"Mychecks"`
 | MASTER_BADGE_LABEL | `"Mychecks"`
@@ -157,6 +158,11 @@ can send pings).
 
 If you close new user registration, you can still selectively invite users
 to your team account.
+
+`EMAIL_USE_VERIFICATION` enables/disables the sending of a verification
+link when an email address is added to the list of notification methods.
+Set it to `False` if you are setting up a private healthchecks instance where
+you trust your users and want to avoid the extra verification step.
 
 
 ## Database Configuration
@@ -244,14 +250,6 @@ There are separate Django management commands for each task:
     $ ./manage.py prunepings
     ```
 
-* Remove checks older than 2 hours that are not assigned to users. Such
-  checks are by-products of random visitors and robots loading the welcome
-  page and never setting up an account:
-
-    ```
-    $ ./manage.py prunechecks
-    ```
-
 * Remove old records of sent notifications. For each check, remove
   notifications that are older than the oldest stored ping for same check.
 
@@ -260,9 +258,9 @@ There are separate Django management commands for each task:
     ```
 
 * Remove user accounts that match either of these conditions:
- * Account was created more than 6 months ago, and user has never logged in.
+  * Account was created more than 6 months ago, and user has never logged in.
    These can happen when user enters invalid email address when signing up.
- * Last login was more than 6 months ago, and the account has no checks.
+  * Last login was more than 6 months ago, and the account has no checks.
    Assume the user doesn't intend to use the account any more and would
    probably *want* it removed.
 
@@ -270,10 +268,45 @@ There are separate Django management commands for each task:
     $ ./manage.py pruneusers
     ```
 
+* Remove old records fromt he `api_tokenbucket` table. The TokenBucket
+  model is used for rate-limiting login attempts and similar operations.
+  Any records older than one day can be safely removed.
+
+    ```
+    $ ./manage.py prunetokenbucket
+    ```
+
 When you first try these commands on your data, it is a good idea to
 test them on a copy of your database, not on the live database right away.
 In a production setup, you should also have regular, automated database
 backups set up.
+
+
+## Deployment
+
+### Docker
+
+To run the app, you can:
+
+    $ docker build -t healthchecks:latest .
+
+    $ docker volume create \
+	--driver local \
+	--opt type=tmpfs \
+	--opt device=tmpfs \
+	--opt o=uid=900,gid=900 \
+	healthchecks
+
+    $ docker run -d \
+	--name healthchecks \
+	--mount source=healthchecks,target=/data \
+	-p 8000:8000 \
+	healthchecks:latest
+
+to migrate the db:
+
+    $ docker exec healthchecks ./manage.py migrate
+
 
 ## Integrations
 

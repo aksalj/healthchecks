@@ -1,12 +1,11 @@
 from datetime import timedelta as td
 from django import forms
-
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from hc.api.models import TokenBucket
 
 
 class LowercaseEmailField(forms.EmailField):
-
     def clean(self, value):
         value = super(LowercaseEmailField, self).clean(value)
         return value.lower()
@@ -15,23 +14,30 @@ class LowercaseEmailField(forms.EmailField):
 class AvailableEmailForm(forms.Form):
     # Call it "identity" instead of "email"
     # to avoid some of the dumber bots
-    identity = LowercaseEmailField(error_messages={'required': 'Please enter your email address.'})
+    identity = LowercaseEmailField(
+        error_messages={"required": "Please enter your email address."}
+    )
 
     def clean_identity(self):
         v = self.cleaned_data["identity"]
         if User.objects.filter(email=v).exists():
-            raise forms.ValidationError("An account with this email address already exists.")
+            raise forms.ValidationError(
+                "An account with this email address already exists."
+            )
 
         return v
 
 
-class ExistingEmailForm(forms.Form):
+class EmailLoginForm(forms.Form):
     # Call it "identity" instead of "email"
     # to avoid some of the dumber bots
     identity = LowercaseEmailField()
 
     def clean_identity(self):
         v = self.cleaned_data["identity"]
+        if not TokenBucket.authorize_login_email(v):
+            raise forms.ValidationError("Too many attempts, please try later.")
+
         try:
             self.user = User.objects.get(email=v)
         except User.DoesNotExist:
@@ -40,20 +46,21 @@ class ExistingEmailForm(forms.Form):
         return v
 
 
-class EmailPasswordForm(forms.Form):
+class PasswordLoginForm(forms.Form):
     email = LowercaseEmailField()
     password = forms.CharField()
 
     def clean(self):
-        username = self.cleaned_data.get('email')
-        password = self.cleaned_data.get('password')
+        username = self.cleaned_data.get("email")
+        password = self.cleaned_data.get("password")
 
         if username and password:
+            if not TokenBucket.authorize_login_password(username):
+                raise forms.ValidationError("Too many attempts, please try later.")
+
             self.user = authenticate(username=username, password=password)
-            if self.user is None:
-                raise forms.ValidationError("Incorrect email or password")
-            if not self.user.is_active:
-                raise forms.ValidationError("Account is inactive")
+            if self.user is None or not self.user.is_active:
+                raise forms.ValidationError("Incorrect email or password.")
 
         return self.cleaned_data
 
@@ -72,7 +79,7 @@ class ReportSettingsForm(forms.Form):
 
 
 class SetPasswordForm(forms.Form):
-    password = forms.CharField()
+    password = forms.CharField(min_length=8)
 
 
 class ChangeEmailForm(forms.Form):

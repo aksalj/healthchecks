@@ -9,7 +9,7 @@
 <div class="row">
     <div class="col-sm-12">
         <ol class="breadcrumb">
-            <li><a href="{% url 'hc-checks' check.project.code %}">Checks</a></li>
+            <li><a href="{% url 'hc-checks' check.project.code %}">{{ check.project }}</a></li>
             <li>
                 <a href="{% url 'hc-details' check.code %}">
                     {{ check.name_then_code }}
@@ -97,7 +97,7 @@
             <td class="time"></td>
             <td class="alert-info" colspan="2">
                 {% if event.channel.kind == "email" %}
-                    Sent email alert to {{ event.channel.value }}
+                    Sent email alert to {{ event.channel.email_value }}
                 {% elif event.channel.kind == "slack" %}
                     Sent Slack alert
                     {% if event.channel.slack_channel %}
@@ -107,6 +107,8 @@
                     Sent alert to PagerDuty
                 {% elif event.channel.kind == "pagertree" %}
                     Sent alert to PagerTree
+                {% elif event.channel.kind == "pagerteam" %}
+                    Sent alert to Pager Team
                 {% elif event.channel.kind == "opsgenie" %}
                     Sent alert to OpsGenie
                 {% elif event.channel.kind == "hipchat" %}
