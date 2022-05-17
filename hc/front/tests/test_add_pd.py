@@ -3,41 +3,55 @@ from hc.api.models import Channel
 from hc.test import BaseTestCase
 
 
-@override_settings(PD_VENDOR_KEY="foo")
+@override_settings(PD_APP_ID=None)
 class AddPdTestCase(BaseTestCase):
-    url = "/integrations/add_pd/"
+    def setUp(self):
+        super().setUp()
+        self.url = "/projects/%s/add_pd/" % self.project.code
 
     def test_instructions_work(self):
         self.client.login(username="alice@example.org", password="password")
         r = self.client.get(self.url)
-        self.assertContains(r, "If your team uses")
+        self.assertContains(r, "Paste the Integration Key down below")
 
     def test_it_works(self):
-        session = self.client.session
-        session["pd"] = "1234567890AB"  # 12 characters
-        session.save()
+        # Integration key is 32 characters long
+        form = {"value": "12345678901234567890123456789012"}
 
         self.client.login(username="alice@example.org", password="password")
-        url = "/integrations/add_pd/1234567890AB/?service_key=123"
-        r = self.client.get(url)
-        self.assertEqual(r.status_code, 302)
+        r = self.client.post(self.url, form)
+        self.assertRedirects(r, self.channels_url)
 
         c = Channel.objects.get()
         self.assertEqual(c.kind, "pd")
-        self.assertEqual(c.pd_service_key, "123")
-        self.assertEqual(c.project, self.project)
+        self.assertEqual(c.value, "12345678901234567890123456789012")
 
-    def test_it_validates_code(self):
-        session = self.client.session
-        session["pd"] = "1234567890AB"  # 12 characters
-        session.save()
+    def test_it_trims_whitespace(self):
+        form = {"value": "   123456   "}
 
         self.client.login(username="alice@example.org", password="password")
-        url = "/integrations/add_pd/XXXXXXXXXXXX/?service_key=123"
-        r = self.client.get(url)
-        self.assertEqual(r.status_code, 400)
+        self.client.post(self.url, form)
 
-    @override_settings(PD_VENDOR_KEY=None)
-    def test_it_requires_vendor_key(self):
-        r = self.client.get("/integrations/add_pd/")
+        c = Channel.objects.get()
+        self.assertEqual(c.value, "123456")
+
+    def test_it_requires_rw_access(self):
+        self.bobs_membership.role = "r"
+        self.bobs_membership.save()
+
+        self.client.login(username="bob@example.org", password="password")
+        r = self.client.get(self.url)
+        self.assertEqual(r.status_code, 403)
+
+    @override_settings(PD_ENABLED=False)
+    def test_it_handles_disabled_integration(self):
+        self.client.login(username="alice@example.org", password="password")
+        r = self.client.get(self.url)
         self.assertEqual(r.status_code, 404)
+
+    @override_settings(PD_APP_ID="FOOBAR")
+    def test_it_handles_pd_app_id(self):
+        self.client.login(username="alice@example.org", password="password")
+        r = self.client.get(self.url)
+        self.assertContains(r, "app_id=FOOBAR")
+        self.assertIn("pagerduty", self.client.session)

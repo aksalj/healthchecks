@@ -12,8 +12,8 @@
 }
 
 @media (min-width: 992px) {
-    #change-billing-plan-modal .modal-dialog {
-        width: 850px;
+    #change-billing-plan-modal .modal-dialog, #payment-method-modal .modal-dialog, #please-wait-modal .modal-dialog {
+        width: 900px;
     }
 }
 
@@ -27,7 +27,7 @@
 }
 
 #change-billing-plan-modal .plan {
-    border-color: #ddd;
+    border-color: var(--border-color);
     padding: 24px;
     position: relative;
     cursor: pointer;
@@ -35,6 +35,14 @@
 
 #change-billing-plan-modal .plan.selected {
     border-color: #0091EA;
+}
+
+#payment-method-modal .modal-header {
+    border-bottom: 0;
+}
+
+#payment-method-modal .modal-footer {
+    border-top: 0;
 }
 
 .plan .marker {
@@ -75,11 +83,19 @@
 
 #change-billing-plan-modal .plan li {
     margin: 0;
-    padding: 0;
+    padding: 1px 0;
 }
 
 #change-billing-plan-modal .text-warning {
     margin-top: 20px;
 }
 
+.text-muted code {
+    color: #777;
+}
 
+#please-wait-modal .modal-body {
+    text-align: center;
+    padding: 100px;
+    font-size: 18px;
+}

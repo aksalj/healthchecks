@@ -5,9 +5,11 @@
                 <button type="button" class="close" data-dismiss="modal">&times;</button>
             </div>
             <div class="modal-body">
-                <h1>Create Your Account</h1>
-                <p>Enter your <strong>email address</strong>.</p>
+                <div class="title">Create Your Account</div>
 
+                <label for="signup-email">
+                    Enter your <strong>email address</strong>.
+                </label>
                 <input
                     type="email"
                     class="form-control input-lg"
@@ -20,8 +22,6 @@
                     We will email you a magic sign in link.
                 </p>
 
-
-                {% csrf_token %}
                 <button id="signup-go" class="btn btn-lg btn-primary btn-block">
                     Email Me a Link
                 </button>

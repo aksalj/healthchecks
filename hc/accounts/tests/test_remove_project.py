@@ -4,7 +4,7 @@ from hc.test import BaseTestCase
 
 class RemoveProjectTestCase(BaseTestCase):
     def setUp(self):
-        super(RemoveProjectTestCase, self).setUp()
+        super().setUp()
 
         self.url = "/projects/%s/remove/" % self.project.code
 
@@ -14,10 +14,6 @@ class RemoveProjectTestCase(BaseTestCase):
         self.client.login(username="alice@example.org", password="password")
         r = self.client.post(self.url)
         self.assertRedirects(r, "/")
-
-        # Alice's current project should be not set
-        self.profile.refresh_from_db()
-        self.assertEqual(self.profile.current_project, None)
 
         # Alice should not own any projects
         self.assertFalse(self.alice.project_set.exists())

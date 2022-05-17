@@ -1,4 +1,6 @@
 from datetime import timedelta as td
+import time
+from unittest.mock import patch
 
 from django.core import signing
 from django.utils.timezone import now
@@ -15,11 +17,11 @@ class UnsubscribeReportsTestCase(BaseTestCase):
         sig = signing.TimestampSigner(salt="reports").sign("alice")
         url = "/accounts/unsubscribe_reports/%s/" % sig
 
-        r = self.client.get(url)
+        r = self.client.post(url)
         self.assertContains(r, "Unsubscribed")
 
         self.profile.refresh_from_db()
-        self.assertFalse(self.profile.reports_allowed)
+        self.assertEqual(self.profile.reports, "off")
         self.assertIsNone(self.profile.next_report_date)
 
         self.assertEqual(self.profile.nag_period.total_seconds(), 0)
@@ -30,16 +32,31 @@ class UnsubscribeReportsTestCase(BaseTestCase):
         r = self.client.get(url)
         self.assertContains(r, "Incorrect Link")
 
-    def test_post_works(self):
+    def test_it_serves_confirmation_form(self):
+        sig = signing.TimestampSigner(salt="reports").sign("alice")
+        url = "/accounts/unsubscribe_reports/%s/" % sig
+
+        r = self.client.get(url)
+        self.assertContains(r, "Please press the button below")
+        self.assertNotContains(r, "submit()")
+
+    def test_aged_signature_autosubmits(self):
+        with patch("django.core.signing.time") as mock_time:
+            mock_time.time.return_value = time.time() - 301
+            signer = signing.TimestampSigner(salt="reports")
+            sig = signer.sign("alice")
+
+        url = "/accounts/unsubscribe_reports/%s/" % sig
+
+        r = self.client.get(url)
+        self.assertContains(r, "Please press the button below")
+        self.assertContains(r, "submit()")
+
+    def test_it_handles_missing_user(self):
+        self.alice.delete()
+
         sig = signing.TimestampSigner(salt="reports").sign("alice")
         url = "/accounts/unsubscribe_reports/%s/" % sig
 
         r = self.client.post(url)
         self.assertContains(r, "Unsubscribed")
-
-    def test_it_serves_confirmation_form(self):
-        sig = signing.TimestampSigner(salt="reports").sign("alice")
-        url = "/accounts/unsubscribe_reports/%s/?ask=1" % sig
-
-        r = self.client.get(url)
-        self.assertContains(r, "Please press the button below")

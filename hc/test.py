@@ -1,12 +1,15 @@
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.core.signing import TimestampSigner
+from django.test import Client, TestCase
 
 from hc.accounts.models import Member, Profile, Project
 
 
 class BaseTestCase(TestCase):
     def setUp(self):
-        super(BaseTestCase, self).setUp()
+        super().setUp()
+
+        self.csrf_client = Client(enforce_csrf_checks=True)
 
         # Alice is a normal user for tests. Alice has team access enabled.
         self.alice = User(username="alice", email="alice@example.org")
@@ -14,13 +17,13 @@ class BaseTestCase(TestCase):
         self.alice.save()
 
         self.project = Project(owner=self.alice, api_key="X" * 32)
-        self.project.name = "Alice's Project"
+        self.project.name = "Alices Project"
         self.project.badge_key = self.alice.username
+        self.project.ping_key = "p" * 22
         self.project.save()
 
         self.profile = Profile(user=self.alice)
         self.profile.sms_limit = 50
-        self.profile.current_project = self.project
         self.profile.save()
 
         # Bob is on Alice's team and should have access to her stuff
@@ -33,10 +36,11 @@ class BaseTestCase(TestCase):
         self.bobs_project.save()
 
         self.bobs_profile = Profile(user=self.bob)
-        self.bobs_profile.current_project = self.project
         self.bobs_profile.save()
 
-        Member.objects.create(user=self.bob, project=self.project)
+        self.bobs_membership = Member.objects.create(
+            user=self.bob, project=self.project, role=Member.Role.REGULAR
+        )
 
         # Charlie should have no access to Alice's stuff
         self.charlie = User(username="charlie", email="charlie@example.org")
@@ -48,5 +52,11 @@ class BaseTestCase(TestCase):
         self.charlies_project.save()
 
         self.charlies_profile = Profile(user=self.charlie)
-        self.charlies_profile.current_project = self.charlies_project
         self.charlies_profile.save()
+
+        self.channels_url = "/projects/%s/integrations/" % self.project.code
+
+    def set_sudo_flag(self):
+        session = self.client.session
+        session["sudo"] = TimestampSigner().sign("active")
+        session.save()

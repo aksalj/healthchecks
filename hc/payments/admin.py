@@ -42,8 +42,6 @@ class SubsAdmin(admin.ModelAdmin):
 
         return ""
 
-    profile.allow_tags = True
-
     def cancel(self, request, qs):
         for sub in qs.all():
             sub.cancel()
@@ -51,7 +49,7 @@ class SubsAdmin(admin.ModelAdmin):
         profile = Profile.objects.for_user(sub.user)
         profile.check_limit = 20
         profile.team_limit = 2
-        profile.sms_limit = 0
+        profile.sms_limit = 5
         profile.save()
 
         self.message_user(request, "%d subscriptions cancelled" % qs.count())

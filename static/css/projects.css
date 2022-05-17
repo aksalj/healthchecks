@@ -1,17 +1,18 @@
 #project-selector a {
-    color: #333;
+    color: var(--text-color);
 }
 
 #project-selector a:hover {
     text-decoration: none;
 }
 
-#project-selector a:hover .project {
-    border-color: #0091EA;
+#project-selector a:hover .project,
+#project-selector .project.selected {
+    border-color: var(--link-color);
 }
 
 #project-selector .project {
-    border-color: #ddd;
+    border-color: var(--border-color);
     padding: 24px 24px 24px 64px;
     position: relative;
     min-height: 120px;
@@ -20,10 +21,9 @@
 #project-selector .project h4 {
     font-weight: bold;
     margin-top: 0;
-}
-
-#project-selector .project.selected {
-    border-color: #0091EA;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #project-selector .project .status {
@@ -32,7 +32,7 @@
 }
 
 #project-selector #add-project .project {
-    border: 1px dashed #ddd;
+    border-style: dashed;
     padding: 0;
     text-align: center;
     font-size: 18px;
@@ -42,6 +42,7 @@
 }
 
 #project-selector #add-project:hover .project {
-    border-color: #0091EA;
-    color: #333;
+    border-color: var(--link-color);
+    color: var(--text-color);
 }
+

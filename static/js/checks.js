@@ -1,12 +1,16 @@
 $(function () {
+    var base = document.getElementById("base-url").getAttribute("href").slice(0, -1);
 
-    $(".my-checks-name").click(function() {
+    $(".rw .my-checks-name").click(function() {
         var code = $(this).closest("tr.checks-row").attr("id");
-        var url = "/checks/" + code + "/name/";
+        var url = base + "/checks/" + code + "/name/";
 
         $("#update-name-form").attr("action", url);
         $("#update-name-input").val(this.dataset.name);
-        $("#update-tags-input").val(this.dataset.tags);
+
+        var tagsSelectize = document.getElementById("update-tags-input").selectize;
+        tagsSelectize.setValue(this.dataset.tags.split(" "));
+
         $("#update-desc-input").val(this.dataset.desc);
         $('#update-name-modal').modal("show");
         $("#update-name-input").focus();
@@ -23,7 +27,7 @@ $(function () {
         }
     });
 
-    $(".integrations").on("click", "span", function() {
+    $(".rw .integrations").on("click", "span", function() {
         var isOff = $(this).toggleClass("off").hasClass("off");
         var token = $('input[name=csrfmiddlewaretoken]').val();
 
@@ -31,7 +35,7 @@ $(function () {
         var checkCode = $(this).closest("tr.checks-row").attr("id");
         var channelCode = $("#ch-" + idx).data("code");
 
-        var url = "/checks/" + checkCode + "/channels/" + channelCode + "/enabled";
+        var url = base + "/checks/" + checkCode + "/channels/" + channelCode + "/enabled";
 
         $.ajax({
             url: url,
@@ -47,20 +51,19 @@ $(function () {
         if (this.innerText == "Never") {
             return false;
         }
-
-        $("#ping-details-body").text("Updating...");
-        $('#ping-details-modal').modal("show");
-
         var code = $(this).closest("tr.checks-row").attr("id");
-        var lastPingUrl = "/checks/" + code + "/last_ping/";
-        $.get(lastPingUrl, function(data) {
-            $("#ping-details-body" ).html(data);
-        });
+        var lastPingUrl = base + "/checks/" + code + "/last_ping/";
+        loadPingDetails(lastPingUrl);
 
-        var logUrl = "/checks/" + code + "/log/";
+        var logUrl = base + "/checks/" + code + "/log/";
         $("#ping-details-log").attr("href", logUrl);
 
         return false;
+    });
+
+    $(".last-ping").tooltip({
+        selector: ".label-confirmation",
+        title: 'The word "confirm" was found in request body'
     });
 
     function applyFilters() {
@@ -79,7 +82,7 @@ $(function () {
 
         // Update hash
         if (window.history && window.history.replaceState) {
-            var url = $("#checks-table").data("list-url");;
+            var url = $("#checks-table").data("list-url");
             if (qs.length) {
                 url += "?" + $.param(qs);
             }
@@ -132,9 +135,45 @@ $(function () {
 
     $(".show-log").click(function(e) {
         var code = $(this).closest("tr.checks-row").attr("id");
-        var url = "/checks/" + code + "/details/";
+        var url = base + "/checks/" + code + "/details/";
         window.location = url;
         return false;
+    });
+
+
+    $(".pause").tooltip({
+        title: "Pause this check?<br />Click again to confirm.",
+        trigger: "manual",
+        html: true
+    });
+
+    $(".pause").click(function() {
+        var btn = $(this);
+
+        // First click: show a confirmation tooltip
+        if (!btn.hasClass("confirm")) {
+            btn.addClass("confirm").tooltip("show");
+            return false;
+        }
+
+        // Second click: update UI and pause the check
+        btn.removeClass("confirm").tooltip("hide");
+        var code = btn.closest("tr.checks-row").attr("id");
+        $("#" + code + " span.status").attr("class", "status ic-paused");
+
+        var url = base + "/checks/" + code + "/pause/";
+        var token = $('input[name=csrfmiddlewaretoken]').val();
+        $.ajax({
+            url: url,
+            type: "post",
+            headers: {"X-CSRFToken": token}
+        });
+
+        return false;
+    });
+
+    $(".pause").mouseleave(function() {
+        $(this).removeClass("confirm").tooltip("hide");
     });
 
     $('[data-toggle="tooltip"]').tooltip({
@@ -142,9 +181,9 @@ $(function () {
         container: "body",
         title: function() {
             var cssClasses = this.getAttribute("class");
-            if (cssClasses.indexOf("icon-new") > -1)
+            if (cssClasses.indexOf("ic-new") > -1)
                 return "New. Has never received a ping.";
-            if (cssClasses.indexOf("icon-paused") > -1)
+            if (cssClasses.indexOf("ic-paused") > -1)
                 return "Monitoring paused. Ping to resume.";
 
             if (cssClasses.indexOf("sort-name") > -1)
@@ -158,6 +197,7 @@ $(function () {
     // Schedule refresh to run every 3s when tab is visible and user
     // is active, every 60s otherwise
     var lastStatus = {};
+    var lastStarted = {};
     var lastPing = {};
     var statusUrl = $("#checks-table").data("status-url");
     function refreshStatus() {
@@ -169,8 +209,12 @@ $(function () {
                 for(var i=0, el; el=data.details[i]; i++) {
                     if (lastStatus[el.code] != el.status) {
                         lastStatus[el.code] = el.status;
-                        $("#" + el.code + " span.status").attr("class", "status icon-" + el.status);
-                        $("#" + el.code + " .pause-li").toggleClass("disabled", el.status == "paused");
+                        $("#" + el.code + " span.status").attr("class", "status ic-" + el.status);
+                    }
+
+                    if (lastStarted[el.code] != el.started) {
+                        lastStarted[el.code] = el.started;
+                        $("#" + el.code + " .spinner").toggleClass("started", el.started);
                     }
 
                     if (lastPing[el.code] != el.last_ping) {
@@ -201,12 +245,12 @@ $(function () {
     }
 
     // Copy to clipboard
-    var clipboard = new Clipboard('button.copy-link');
+    var clipboard = new ClipboardJS('button.copy-link');
     $("button.copy-link").mouseout(function(e) {
         setTimeout(function() {
             e.target.textContent = "copy";
         }, 300);
-    })
+    });
 
     clipboard.on('success', function(e) {
         e.trigger.textContent = "copied!";
@@ -216,6 +260,22 @@ $(function () {
     clipboard.on('error', function(e) {
         var text = e.trigger.getAttribute("data-clipboard-text");
         prompt("Press Ctrl+C to select:", text)
+    });
+
+    // Configure Selectize for entering tags
+    function divToOption() {
+        return {value: this.textContent};
+    }
+
+    $("#update-tags-input").selectize({
+        create: true,
+        createOnBlur: true,
+        delimiter: " ",
+        labelField: "value",
+        searchField: ["value"],
+        hideSelected: true,
+        highlight: false,
+        options: $("#my-checks-tags div").map(divToOption).get()
     });
 
 });

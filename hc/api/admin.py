@@ -1,7 +1,9 @@
 from django.contrib import admin
 from django.core.paginator import Paginator
 from django.db import connection
-from django.db.models import Count, F
+from django.db.models import F
+from django.urls import reverse
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from hc.api.models import Channel, Check, Flip, Notification, Ping
 from hc.lib.date import format_duration
@@ -13,11 +15,12 @@ class ChecksAdmin(admin.ModelAdmin):
         css = {"all": ("css/admin/checks.css",)}
 
     search_fields = ["name", "code", "project__owner__email"]
+    readonly_fields = ("code",)
     raw_id_fields = ("project",)
     list_display = (
         "id",
         "name_tags",
-        "email",
+        "project_",
         "created",
         "n_pings",
         "timeout_schedule",
@@ -32,17 +35,28 @@ class ChecksAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         qs = qs.annotate(email=F("project__owner__email"))
+        qs = qs.annotate(project_name=F("project__name"))
         return qs
 
-    def email(self, obj):
-        return obj.email
+    @mark_safe
+    def project_(self, obj):
+        url = reverse("hc-checks", args=[obj.project.code])
+        name = escape(obj.project_name or "Default")
+        email = escape(obj.email)
+        return f'{email} &rsaquo; <a href="{url}"">{name}</a>'
 
+    @mark_safe
     def name_tags(self, obj):
-        if not obj.tags:
-            return obj.name
+        url = reverse("hc-details", args=[obj.code])
+        name = escape(obj.name or "unnamed")
 
-        return "%s [%s]" % (obj.name, obj.tags)
+        s = f'<a href="{url}"">{name}</a>'
+        for tag in obj.tags_list():
+            s += " <span>%s</span>" % escape(tag)
 
+        return s
+
+    @admin.display(description="Schedule")
     def timeout_schedule(self, obj):
         if obj.kind == "simple":
             return format_duration(obj.timeout)
@@ -51,16 +65,13 @@ class ChecksAdmin(admin.ModelAdmin):
         else:
             return "Unknown"
 
-    timeout_schedule.short_description = "Schedule"
-
+    @admin.action(description="Send Alert")
     def send_alert(self, request, qs):
         for check in qs:
             for channel in check.channel_set.all():
                 channel.notify(check)
 
         self.message_user(request, "%d alert(s) sent" % qs.count())
-
-    send_alert.short_description = "Send Alert"
 
 
 class SchemeListFilter(admin.SimpleListFilter):
@@ -106,7 +117,7 @@ class KindListFilter(admin.SimpleListFilter):
 
 # Adapted from: https://djangosnippets.org/snippets/2593/
 class LargeTablePaginator(Paginator):
-    """ Overrides the count method to get an estimate instead of actual count
+    """Overrides the count method to get an estimate instead of actual count
     when not filtered
     """
 
@@ -150,7 +161,7 @@ class PingsAdmin(admin.ModelAdmin):
     search_fields = ("owner__name", "owner__code")
     readonly_fields = ("owner",)
     list_select_related = ("owner",)
-    list_display = ("id", "created", "owner", "scheme", "method", "ua")
+    list_display = ("id", "created", "owner", "scheme", "method", "object_size", "ua")
     list_filter = ("created", SchemeListFilter, MethodListFilter, KindListFilter)
 
     paginator = LargeTablePaginator
@@ -162,61 +173,88 @@ class ChannelsAdmin(admin.ModelAdmin):
     class Media:
         css = {"all": ("css/admin/channels.css",)}
 
-    search_fields = ["value", "project__owner__email"]
+    search_fields = ["value", "project__owner__email", "name", "code"]
+    readonly_fields = ("code",)
     list_display = (
         "id",
+        "transport",
         "name",
-        "email",
-        "formatted_kind",
-        "value",
-        "num_notifications",
+        "project_",
+        "created",
+        "chopped_value",
+        "ok",
     )
     list_filter = ("kind",)
     raw_id_fields = ("project", "checks")
 
+    @mark_safe
+    def project_(self, obj):
+        url = reverse("hc-checks", args=[obj.project_code])
+        name = escape(obj.project_name or "Default")
+        email = escape(obj.email)
+        return f"{email} &rsaquo; <a href='{url}'>{name}</a>"
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        qs = qs.annotate(Count("notification", distinct=True))
+        qs = qs.annotate(project_code=F("project__code"))
+        qs = qs.annotate(project_name=F("project__name"))
         qs = qs.annotate(email=F("project__owner__email"))
         return qs
 
-    def email(self, obj):
-        return obj.email
-
     @mark_safe
-    def formatted_kind(self, obj):
+    def transport(self, obj):
+        note = ""
         if obj.kind == "email" and not obj.email_verified:
-            return "Email <i>(unconfirmed)</i>"
+            note = " (not verified)"
 
-        return obj.get_kind_display()
+        return f'<span class="ic-{ obj.kind }"></span> &nbsp; {obj.kind}{note}'
 
-    formatted_kind.short_description = "Kind"
+    @admin.display(description="Value")
+    def chopped_value(self, obj):
+        if len(obj.value) > 100:
+            return "%s…" % obj.value[:100]
 
-    def num_notifications(self, obj):
-        return obj.notification__count
+        return obj.value
 
-    num_notifications.short_description = "# Notifications"
+    @admin.display(boolean=True)
+    def ok(self, obj):
+        return False if obj.last_error else True
 
 
 @admin.register(Notification)
 class NotificationsAdmin(admin.ModelAdmin):
-    search_fields = ["owner__name", "owner__code", "channel__value"]
-    list_select_related = ("owner", "channel")
+    class Media:
+        css = {"all": ("css/admin/notifications.css",)}
+
+    search_fields = ["owner__name", "owner__code", "channel__value", "error", "code"]
+    readonly_fields = ("owner", "code")
+    list_select_related = ("channel", "owner")
     list_display = (
         "id",
         "created",
-        "check_status",
-        "owner",
         "channel_kind",
+        "check_status",
+        "formatted_owner",
         "channel_value",
+        "error",
     )
     list_filter = ("created", "check_status", "channel__kind")
+    raw_id_fields = ("channel",)
 
     def channel_kind(self, obj):
         return obj.channel.kind
 
+    @mark_safe
     def channel_value(self, obj):
-        return obj.channel.value
+        return "<div>%s</div>" % escape(obj.channel.value)
+
+    @admin.display(description="Owner")
+    @mark_safe
+    def formatted_owner(self, obj):
+        if obj.owner:
+            url = reverse("hc-details", args=[obj.owner.code])
+            name = escape(obj.owner.name_then_code())
+            return f"<div><a href='{url}'>{name}</a></div>"
 
 
 @admin.register(Flip)

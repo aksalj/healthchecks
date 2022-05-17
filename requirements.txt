@@ -1,6 +1,11 @@
-croniter==0.3.30
-Django==2.2.1
-django_compressor==2.2
-psycopg2==2.7.5
-pytz==2019.1
-requests==2.22.0
+cron-descriptor==1.2.24
+cronsim==2.1
+Django==4.0.4
+django-compressor==4.0
+fido2==0.9.3
+psycopg2==2.9.3
+pyotp==2.6.0
+requests==2.27.1
+segno==1.4.1
+statsd==3.3.0
+whitenoise==6.0.0

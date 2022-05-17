@@ -4,6 +4,7 @@
 {% block title %}{{ num_down|num_down_title }}{% endblock %}
 
 {% block content %}
+
 {% if checks %}
 <div class="row">
     <div id="my-checks-tags" class="col-sm-9">
@@ -31,7 +32,9 @@
     {% endif %}
     </div>
 </div>
-<div class="row">
+
+{% if rw %}
+<div id="my-checks-bottom-actions" class="row">
     <div class="col-sm-12">
         {% if num_available > 0 %}
             <form method="post" action="{% url 'hc-add-check' project.code %}" class="text-center">
@@ -45,13 +48,18 @@
             {% endif %}
         {% else %}
             <div class="alert alert-info">
-                <strong>Check limit reached.</strong>
+                <strong>There are more things to monitor.</strong>
                 To add more checks, please
-                <a href="{% url 'hc-billing' %}">upgrade your account!</a>
+                {% if request.user == project.owner %}
+                <a href="{% url 'hc-billing' %}">upgrade your account</a>.
+                {% else %}
+                ask <strong>{{ project.owner.email }}</strong> to upgrade their account.
+                {% endif %}
             </div>
         {% endif %}
     </div>
 </div>
+{% endif %}
 
 {% include "front/update_name_modal.html" %}
 {% include "front/update_timeout_modal.html" %}
@@ -82,13 +90,16 @@
 
 {% block scripts %}
 {% compress js %}
-<script src="{% static 'js/jquery-2.1.4.min.js' %}"></script>
+<script src="{% static 'js/jquery-3.6.0.min.js' %}"></script>
 <script src="{% static 'js/bootstrap.min.js' %}"></script>
 <script src="{% static 'js/bootstrap-select.min.js' %}"></script>
+<script src="{% static 'js/selectize.min.js' %}"></script>
 <script src="{% static 'js/nouislider.min.js' %}"></script>
 <script src="{% static 'js/clipboard.min.js' %}"></script>
+<script src="{% static 'js/purify.min.js' %}"></script>
 <script src="{% static 'js/update-timeout-modal.js' %}"></script>
 <script src="{% static 'js/adaptive-setinterval.js' %}"></script>
+<script src="{% static 'js/ping_details.js' %}"></script>
 <script src="{% static 'js/checks.js' %}"></script>
 {% endcompress %}
 {% endblock %}

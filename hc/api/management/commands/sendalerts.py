@@ -1,9 +1,15 @@
+from datetime import timedelta as td
+import signal
 import time
 from threading import Thread
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from hc.api.models import Check, Flip
+from statsd.defaults.env import statsd
+
+SENDING_TMPL = "Sending alert, status=%s, code=%s\n"
+SEND_TIME_TMPL = "Sending took %.1fs, code=%s\n"
 
 
 def notify(flip_id, stdout):
@@ -16,17 +22,29 @@ def notify(flip_id, stdout):
     # And just to make sure it doesn't get saved by a future coding accident:
     setattr(check, "save", None)
 
-    tmpl = "Sending alert, status=%s, code=%s\n"
-    stdout.write(tmpl % (flip.new_status, check.code))
+    stdout.write(SENDING_TMPL % (flip.new_status, check.code))
 
-    # Set dates for followup nags
-    if flip.new_status == "down":
-        check.project.set_next_nag_date()
+    # Set or clear dates for followup nags
+    check.project.update_next_nag_dates()
 
     # Send notifications
-    errors = flip.send_alerts()
-    for ch, error in errors:
-        stdout.write("ERROR: %s %s %s\n" % (ch.kind, ch.value, error))
+    send_start = timezone.now()
+
+    for ch, error, secs in flip.send_alerts():
+        label = "OK"
+        if error:
+            label = "ERROR"
+        elif secs > 5:
+            label = "SLOW"
+
+        s = " * %-5s %4.1fs %-10s %s %s\n" % (label, secs, ch.kind, ch.code, error)
+        stdout.write(s)
+
+    send_time = timezone.now() - send_start
+    stdout.write(SEND_TIME_TMPL % (send_time.total_seconds(), check.code))
+
+    statsd.timing("hc.sendalerts.dwellTime", send_start - flip.created)
+    statsd.timing("hc.sendalerts.sendTime", send_time)
 
 
 def notify_on_thread(flip_id, stdout):
@@ -82,9 +100,6 @@ class Command(BaseCommand):
 
         now = timezone.now()
 
-        # In PostgreSQL, add this index to run the below query efficiently:
-        # CREATE INDEX api_check_up ON api_check (alert_after) WHERE status = 'up'
-
         q = Check.objects.filter(alert_after__lt=now).exclude(status="down")
         # Sort by alert_after, to avoid unnecessary sorting by id:
         check = q.order_by("alert_after").first()
@@ -94,7 +109,16 @@ class Command(BaseCommand):
         old_status = check.status
         q = Check.objects.filter(id=check.id, status=old_status)
 
-        if check.get_status(with_started=False) != "down":
+        try:
+            status = check.get_status()
+        except Exception as e:
+            # Make sure we don't trip on this check again for an hour:
+            # Otherwise sendalerts may end up in a crash loop.
+            q.update(alert_after=now + td(hours=1))
+            # Then re-raise the exception:
+            raise e
+
+        if status != "down":
             # It is not down yet. Update alert_after
             q.update(alert_after=check.going_down_after())
             return True
@@ -114,26 +138,37 @@ class Command(BaseCommand):
 
         return True
 
-    def handle(self, use_threads=True, loop=True, *args, **options):
-        self.stdout.write("sendalerts is now running\n")
+    def on_sigterm(self, *args):
+        self.stdout.write("Received SIGTERM, finishing...\n")
+        self.sigterm = True
 
+    def handle(self, use_threads=True, loop=True, *args, **options):
+        self.sigterm = False
+        signal.signal(signal.SIGTERM, self.on_sigterm)
+
+        self.stdout.write("sendalerts is now running\n")
         i, sent = 0, 0
-        while True:
+        while not self.sigterm:
             # Create flips for any checks going down
-            while self.handle_going_down():
+            while not self.sigterm and self.handle_going_down():
                 pass
 
             # Process the unprocessed flips
-            while self.process_one_flip(use_threads):
+            while not self.sigterm and self.process_one_flip(use_threads):
                 sent += 1
 
             if not loop:
                 break
 
-            time.sleep(2)
-            i += 1
+            # Sleep for 2 seconds before looking for more work
+            if not self.sigterm:
+                i += 2
+                time.sleep(2)
+
+            # Print "-- MARK --" approx. every minute so the logs
+            # have evidence sendalerts is still running:
             if i % 60 == 0:
                 timestamp = timezone.now().isoformat()
                 self.stdout.write("-- MARK %s --\n" % timestamp)
 
-        return "Sent %d alert(s)" % sent
+        return f"Sent {sent} alert(s)."

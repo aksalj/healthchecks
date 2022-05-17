@@ -1,32 +1,68 @@
-.panel-pricing .list-group-item {
-  color: #777777;
-}
-.panel-pricing .list-group-item:last-child {
-  border-bottom-right-radius: 0px;
-  border-bottom-left-radius: 0px;
-}
-.panel-pricing .list-group-item:first-child {
-  border-top-right-radius: 0px;
-  border-top-left-radius: 0px;
-}
-.panel-pricing .panel-body {
-    font-size: 40px;
-    color: #777777;
-    padding: 20px;
-    margin: 0px;
-    background-color: #f0f0f0;
+#pricing-tagline {
+    font-weight: bold;
+    margin: 20px 0;
+    font-size: 28px;
 }
 
-#subscription-status form {
+.panel.plan h1 {
+    font-size: 24px;
+    font-weight: bold;
+
     display: inline-block;
+    line-height: 0.9;
+    text-shadow: 0px 1px var(--panel-bg), -1px 1px var(--panel-bg), 1px 1px var(--panel-bg), -1px 0px var(--panel-bg);
 }
 
-#payment-method-modal .modal-header {
-    border-bottom: 0;
+.panel.plan ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
-#payment-method-modal .modal-footer {
-    border-top: 0;
+.panel.plan li {
+    border-top: 1px solid var(--border-color);
+    padding: 10px 8px;
+}
+
+.hobbyist h1 {
+    color: var(--plan-hobbyist-color);
+    border-bottom: 3px solid var(--plan-hobbyist-border);
+}
+
+.supporter h1 {
+    color: var(--plan-supporter-color);
+    border-bottom: 3px solid var(--plan-supporter-border);
+}
+
+.business h1 {
+    color: var(--plan-business-color);
+    border-bottom: 3px solid var(--plan-business-border);
+}
+
+.business-plus h1 {
+    color: var(--plan-business-plus-color);
+    border-bottom: 3px solid var(--plan-business-plus-border);
+}
+
+.mo {
+    font-size: 16px;
+}
+
+.plan .btn  {
+    font-weight: bold;
+    color: #1ea65a;
+    border-color: #1ea65a;
+    background: #FFF;
+    transition: all 0.2s ease;
+
+    border-radius: 5px;
+    padding: 8px 20px;
+}
+
+.plan .btn:hover {
+    color: #fff;
+    background: #22bc66;
+    border-color: #22bc66;
 }
 
 .error-message {
@@ -42,10 +78,6 @@
     font-weight: bold;
 }
 
-.mo {
-    font-size: 18px;
-    color: #888;
-}
 
 #period-controls {
     text-align: center;
@@ -58,9 +90,19 @@
 
 #plans .panel-footer {
     background: transparent;
+    border-top: 0;
 }
 
 #annual-note {
     margin: 10px 0;
-    color: #AAA;
+    color: var(--text-muted);
+}
+
+.page-pricing span[data-help] {
+    border-bottom: 1px dashed #888;
+    cursor: help;
+}
+
+.page-pricing .tooltip-inner {
+    text-align: left;
 }

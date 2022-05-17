@@ -3,14 +3,14 @@
     <table class="table" id="log">
     {% for event in events %}
     {% if event.n %}
-    <tr class="ok" data-dt="{{ event.created.isoformat }}" data-url="{% url 'hc-ping-details' check.code event.n  %}">
-        <td class="n-cell">
-            <span class="hash">#</span>{{ event.n }}
-        </td>
-        <td class="date"></td>
-        <td class="time"></td>
-        <td class="text-right">
-            {% if event.kind == "fail" %}
+    <tr class="ok" data-dt="{{ event.created|isoformat }}" data-url="{% url 'hc-ping-details' check.code event.n  %}">
+        <td>{{ event.n }}</td>
+        <td></td>
+        <td></td>
+        <td class="event">
+            {% if event.exitstatus > 0 %}
+            <span class="label label-danger">Status {{ event.exitstatus }}</span>
+            {% elif event.kind == "fail" %}
             <span class="label label-danger">Failure</span>
             {% elif event.kind == "start" %}
             <span class="label label-start">Started</span>
@@ -23,7 +23,7 @@
         <td class="details">
             {% if event.delta %}
             <div class="delta">
-                <span class="icon-timer"></span>
+                <span class="ic-timer"></span>
                 {{ event.delta|hms }}
             </div>
             {% endif %}
@@ -31,67 +31,33 @@
             {% if event.scheme == "email" %}
                 {{ event.ua }}
             {% else %}
-                {{ event.scheme|upper }}
-                {{ event.method }}
+                {{ event.scheme|upper }} {{ event.method }}
                 {% if event.remote_addr %}
                 from {{ event.remote_addr }}
                 {% endif %}
-                <span class="ua-body">
-                    {% if event.ua %}
-                    - {{ event.ua|truncatechars:80 }}
-                    {% endif %}
-                </span>
+                {% if event.ua %}
+                <code> - {{ event.ua|truncatechars:80 }}</code>
+                {% endif %}
             {% endif %}
         </td>
     </tr>
-    {% endif %}
-    {% if event.check_status %}
+    {% elif event.check_status %}
     <tr class="missing" data-dt="{{ event.created.isoformat }}">
-        <td class="n-cell">
-            <span class="icon-missing"></span>
-        </td>
-        <td class="date"></td>
-        <td class="time"></td>
-        <td class="alert-info" colspan="2">
-            {% if event.channel.kind == "email" %}
-                Sent email alert to {{ event.channel.email_value }}
-            {% elif event.channel.kind == "slack" %}
-                Sent Slack alert
-                {% if event.channel.slack_channel %}
-                    to {{ event.channel.slack_channel }}
-                {% endif %}
-            {% elif event.channel.kind == "pd" %}
-                Sent alert to PagerDuty
-            {% elif event.channel.kind == "pagertree" %}
-                Sent alert to PagerTree
-            {% elif event.channel.kind == "pagerteam" %}
-                Sent alert to Pager Team
-            {% elif event.channel.kind == "opsgenie" %}
-                Sent alert to OpsGenie
-            {% elif event.channel.kind == "hipchat" %}
-                Sent alert to HipChat
-            {% elif event.channel.kind == "po" %}
-                Sent a Pushover notification
-            {% elif event.channel.kind == "webhook" %}
-                Called webhook {{ event.channel.url_down }}
-            {% else %}
-                Sent alert to {{ event.channel.kind|capfirst }}
-            {% endif %}
-            {% if event.error %}
-                <br />
-                <strong>Error: {{ event.error }}</strong>
-            {% endif %}
-        </td>
+        <td><span class="ic-missing"></span></td>
+        <td></td>
+        <td></td>
+        <td class="alert-info" colspan="2">{% include "front/event_summary.html" %}</td>
     </tr>
     {% endif %}
     {% endfor %}
     </table>
 
-    {% if check.n_pings > 20 %}
     <p class="text-center">
         <a href="{% url 'hc-log' check.code %}">Show More&hellip;</a>
     </p>
-    {% endif %}
 {% else %}
-    <div class="alert alert-info">This check has not received any pings yet.</div>
+    <div class="alert no-events">
+        You will see a <span class="hidden-xs">live-updating</span> log of received pings here. <br />
+        This check has not received any pings yet.
+    </div>
 {% endif %}

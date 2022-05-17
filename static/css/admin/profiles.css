@@ -8,6 +8,9 @@
     list-style-type: none;
 }
 
-.field-email span {
-    border-bottom: 2px solid #FFEB3B;
+td.field-email span {
+    color: #555;
+    background: #EEE;
+    padding: 1px 4px;
+    border-radius: 2px;
 }

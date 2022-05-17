@@ -3,6 +3,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("projects/<uuid:code>/pricing/", views.pricing, name="hc-p-pricing"),
     path("pricing/", views.pricing, name="hc-pricing"),
     path("accounts/profile/billing/", views.billing, name="hc-billing"),
     path(
@@ -16,12 +17,6 @@ urlpatterns = [
         views.payment_method,
         name="hc-payment-method",
     ),
-    path(
-        "invoice/pdf/<slug:transaction_id>/", views.pdf_invoice, name="hc-invoice-pdf"
-    ),
-    path("pricing/set_plan/", views.set_plan, name="hc-set-plan"),
-    path(
-        "pricing/get_client_token/", views.get_client_token, name="hc-get-client-token"
-    ),
-    path("pricing/charge/", views.charge_webhook),
+    path("pricing/update/", views.update, name="hc-update-subscription"),
+    path("pricing/token/", views.token, name="hc-get-client-token"),
 ]

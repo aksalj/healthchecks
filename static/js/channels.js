@@ -1,6 +1,6 @@
 $(function() {
 
-    $(".edit-checks").click(function() {
+    $(".rw .edit-checks").click(function() {
         $("#checks-modal").modal("show");
         $.ajax(this.dataset.url).done(function(data) {
             $("#checks-modal .modal-content").html(data);
@@ -25,6 +25,10 @@ $(function() {
 
         return false;
     });
+
+    $(".channel-modal").on('shown.bs.modal', function () {
+        $(".input-name", this).focus();
+    })
 
     $('[data-toggle="tooltip"]').tooltip();
 

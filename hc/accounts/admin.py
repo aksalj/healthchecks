@@ -1,12 +1,35 @@
 from django.contrib import admin
+from django.contrib.auth import login as auth_login
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from django.db.models import Count, F
+from django.shortcuts import redirect
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
-from hc.accounts.models import Profile, Project
+from hc.accounts.models import Credential, Profile, Project
+
+
+@mark_safe
+def _format_usage(num_checks, num_channels):
+    result = ""
+
+    if num_checks == 0:
+        result += "0 checks, "
+    elif num_checks == 1:
+        result += "1 check, "
+    else:
+        result += f"<strong>{num_checks} checks</strong>, "
+
+    if num_channels == 0:
+        result += "0 channels"
+    elif num_channels == 1:
+        result += "1 channel"
+    else:
+        result += f"<strong>{num_channels} channels</strong>"
+
+    return result
 
 
 class Fieldset:
@@ -22,8 +45,9 @@ class ProfileFieldset(Fieldset):
     name = "User Profile"
     fields = (
         "email",
-        "current_project",
-        "reports_allowed",
+        "reports",
+        "tz",
+        "theme",
         "next_report_date",
         "nag_period",
         "next_nag_date",
@@ -42,7 +66,33 @@ class TeamFieldset(Fieldset):
         "sms_limit",
         "sms_sent",
         "last_sms_date",
+        "call_limit",
+        "calls_sent",
+        "last_call_date",
     )
+
+
+class NumChecksFilter(admin.SimpleListFilter):
+    title = "check count"
+
+    parameter_name = "num_checks"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("10", "10 or more"),
+            ("20", "20 or more"),
+            ("50", "50 or more"),
+            ("100", "100 or more"),
+            ("500", "500 or more"),
+            ("1000", "1000 or more"),
+        )
+
+    def queryset(self, request, queryset):
+        if not self.value():
+            return
+
+        value = int(self.value())
+        return queryset.filter(num_checks__gte=value)
 
 
 @admin.register(Profile)
@@ -51,27 +101,29 @@ class ProfileAdmin(admin.ModelAdmin):
         css = {"all": ("css/admin/profiles.css",)}
 
     readonly_fields = ("user", "email")
-    raw_id_fields = ("current_project",)
     search_fields = ["id", "user__email"]
-    list_per_page = 50
+    list_per_page = 30
     list_select_related = ("user",)
     list_display = (
         "id",
         "email",
-        "engagement",
+        "checks",
         "date_joined",
-        "last_login",
+        "last_active_date",
         "projects",
         "invited",
         "sms",
-        "reports_allowed",
+        "reports",
     )
     list_filter = (
         "user__date_joined",
-        "user__last_login",
-        "reports_allowed",
+        "last_active_date",
+        "reports",
         "check_limit",
+        NumChecksFilter,
+        "theme",
     )
+    actions = ("login",)
 
     fieldsets = (ProfileFieldset.tuple(), TeamFieldset.tuple())
 
@@ -80,40 +132,16 @@ class ProfileAdmin(admin.ModelAdmin):
         qs = qs.prefetch_related("user__project_set")
         qs = qs.annotate(num_members=Count("user__project__member", distinct=True))
         qs = qs.annotate(num_checks=Count("user__project__check", distinct=True))
-        qs = qs.annotate(num_channels=Count("user__project__channel", distinct=True))
         qs = qs.annotate(plan=F("user__subscription__plan_name"))
         return qs
-
-    @mark_safe
-    def engagement(self, obj):
-        result = ""
-
-        if obj.num_checks == 0:
-            result += "0 checks, "
-        elif obj.num_checks == 1:
-            result += "1 check, "
-        else:
-            result += "<strong>%d checks</strong>, " % obj.num_checks
-
-        if obj.num_channels == 0:
-            result += "0 channels"
-        elif obj.num_channels == 1:
-            result += "1 channel, "
-        else:
-            result += "<strong>%d channels</strong>, " % obj.num_channels
-
-        return result
 
     @mark_safe
     def email(self, obj):
         s = escape(obj.user.email)
         if obj.plan:
-            return "<span title='%s'>%s</span>" % (obj.plan, s)
+            s = "%s <span>%s</span>" % (s, obj.plan)
 
         return s
-
-    def last_login(self, obj):
-        return obj.user.last_login
 
     def date_joined(self, obj):
         return obj.user.date_joined
@@ -122,18 +150,30 @@ class ProfileAdmin(admin.ModelAdmin):
     def projects(self, obj):
         return render_to_string("admin/profile_list_projects.html", {"profile": obj})
 
+    @mark_safe
+    def checks(self, obj):
+        s = "%d of %d" % (obj.num_checks, obj.check_limit)
+        if obj.num_checks > 1:
+            s = "<b>%s</b>" % s
+        return s
+
     def invited(self, obj):
         return "%d of %d" % (obj.num_members, obj.team_limit)
 
     def sms(self, obj):
         return "%d of %d" % (obj.sms_sent, obj.sms_limit)
 
+    def login(self, request, qs):
+        profile = qs.get()
+        auth_login(request, profile.user, "hc.accounts.backends.EmailBackend")
+        return redirect("hc-index")
+
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
     readonly_fields = ("code", "owner")
     list_select_related = ("owner",)
-    list_display = ("id", "name_", "users", "engagement", "switch")
+    list_display = ("id", "name_", "users", "usage", "switch")
     search_fields = ["id", "name", "owner__email"]
 
     class Media:
@@ -162,25 +202,8 @@ class ProjectAdmin(admin.ModelAdmin):
     def email(self, obj):
         return obj.owner.email
 
-    @mark_safe
-    def engagement(self, obj):
-        result = ""
-
-        if obj.num_checks == 0:
-            result += "0 checks, "
-        elif obj.num_checks == 1:
-            result += "1 check, "
-        else:
-            result += "<strong>%d checks</strong>, " % obj.num_checks
-
-        if obj.num_channels == 0:
-            result += "0 channels"
-        elif obj.num_channels == 1:
-            result += "1 channel, "
-        else:
-            result += "<strong>%d channels</strong>, " % obj.num_channels
-
-        return result
+    def usage(self, obj):
+        return _format_usage(obj.num_checks, obj.num_channels)
 
     @mark_safe
     def switch(self, obj):
@@ -189,13 +212,14 @@ class ProjectAdmin(admin.ModelAdmin):
 
 
 class HcUserAdmin(UserAdmin):
-    actions = ["send_report"]
+    actions = ["send_report", "send_nag", "deactivate"]
     list_display = (
         "id",
         "email",
-        "engagement",
+        "usage",
         "date_joined",
         "last_login",
+        "last_active",
         "is_staff",
     )
 
@@ -208,28 +232,16 @@ class HcUserAdmin(UserAdmin):
         qs = super().get_queryset(request)
         qs = qs.annotate(num_checks=Count("project__check", distinct=True))
         qs = qs.annotate(num_channels=Count("project__channel", distinct=True))
+        qs = qs.annotate(last_active_date=F("profile__last_active_date"))
 
         return qs
 
+    def last_active(self, user):
+        return user.last_active_date
+
     @mark_safe
-    def engagement(self, user):
-        result = ""
-
-        if user.num_checks == 0:
-            result += "0 checks, "
-        elif user.num_checks == 1:
-            result += "1 check, "
-        else:
-            result += "<strong>%d checks</strong>, " % user.num_checks
-
-        if user.num_channels == 0:
-            result += "0 channels"
-        elif user.num_channels == 1:
-            result += "1 channel, "
-        else:
-            result += "<strong>%d channels</strong>, " % user.num_channels
-
-        return result
+    def usage(self, user):
+        return _format_usage(user.num_checks, user.num_channels)
 
     def send_report(self, request, qs):
         for user in qs:
@@ -237,6 +249,30 @@ class HcUserAdmin(UserAdmin):
 
         self.message_user(request, "%d email(s) sent" % qs.count())
 
+    def send_nag(self, request, qs):
+        for user in qs:
+            user.profile.send_report(nag=True)
+
+        self.message_user(request, "%d email(s) sent" % qs.count())
+
+    def deactivate(self, request, qs):
+        for user in qs:
+            user.is_active = False
+            user.set_unusable_password()
+            user.save()
+
+        self.message_user(request, "%d user(s) deactivated" % qs.count())
+
 
 admin.site.unregister(User)
 admin.site.register(User, HcUserAdmin)
+
+
+@admin.register(Credential)
+class CredentialAdmin(admin.ModelAdmin):
+    list_display = ("id", "created", "email", "name")
+    search_fields = ["id", "code", "name", "user__email"]
+    list_filter = ["created"]
+
+    def email(self, obj):
+        return obj.user.email
